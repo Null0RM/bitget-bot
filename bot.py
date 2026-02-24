@@ -58,9 +58,21 @@ def resolve_symbols(args, config) -> list:
     return result
 
 
-def print_metrics(metrics: dict, symbol: str, tf: str) -> None:
+def parse_leverages(leverages_str: str, symbols: list, default: int) -> dict:
+    """Parse 'BTCUSDT=8,ETHUSDT=6' into per-symbol leverage map."""
+    result = {s: default for s in symbols}
+    if leverages_str:
+        for part in leverages_str.split(","):
+            part = part.strip()
+            if "=" in part:
+                sym, lev = part.split("=", 1)
+                result[sym.strip().upper()] = int(lev.strip())
+    return result
+
+
+def print_metrics(metrics: dict, symbol: str, tf: str, leverage: int, balance: float) -> None:
     print("\n" + "=" * 52)
-    print(f"  BACKTEST RESULTS — {symbol} {tf}")
+    print(f"  BACKTEST RESULTS — {symbol} {tf}  (x{leverage} lev, ${balance:.0f} start)")
     print("=" * 52)
     print(f"  Trades:        {metrics['num_trades']}")
     print(f"  Win Rate:      {metrics['win_rate']:.2f}%")
@@ -80,45 +92,49 @@ def run_backtest(args, config) -> None:
     tf = args.tf or config.timeframe
     limit = args.limit
     out_dir = args.out_dir
+    balance = args.balance
+    leverage_map = parse_leverages(args.leverages, symbols, config.leverage)
 
     os.makedirs(out_dir, exist_ok=True)
 
     client = BitgetClient(config.api_key, config.secret, config.passphrase)
     strategy = EMATrendStrategy(config)
-    risk_manager = RiskManager(config.risk_pct, config.sl_pct, config.tp_pct, config.leverage)
 
     summary = []  # collect per-symbol metrics for the aggregate table
 
     for symbol in symbols:
-        print(f"\n[Backtest] Fetching {limit} candles for {symbol} {tf} ...")
+        lev = leverage_map[symbol]
+        risk_manager = RiskManager(config.risk_pct, config.sl_pct, config.tp_pct, lev)
+
+        print(f"\n[Backtest] Fetching {limit} candles for {symbol} {tf} (x{lev} leverage) ...")
         candles = client.get_candles(symbol, tf, limit)
         df = candles_to_df(candles)
         print(f"[Backtest] Got {len(df)} candles  ({df.index[0]} → {df.index[-1]})")
 
         engine = BacktestEngine()
-        metrics = engine.run(df, strategy, risk_manager, config)
-        print_metrics(metrics, symbol, tf)
+        metrics = engine.run(df, strategy, risk_manager, config, initial_balance=balance)
+        print_metrics(metrics, symbol, tf, lev, balance)
 
         chart_file = os.path.join(out_dir, f"backtest_{symbol}.png")
-        plot_results(df, engine.trades, engine.equity_curve, output_path=chart_file)
+        plot_results(df, engine.trades, engine.equity_curve, output_path=chart_file, config=config)
 
-        summary.append({"symbol": symbol, **metrics})
+        summary.append({"symbol": symbol, "leverage": lev, **metrics})
 
     # Aggregate summary table when multiple symbols were run
     if len(summary) > 1:
-        print("\n" + "=" * 70)
-        print(f"  {'SYMBOL':<12} {'TRADES':>7} {'WIN%':>7} {'PNL':>12} {'DRAWDOWN':>10} {'SHARPE':>8}")
-        print("-" * 70)
+        print("\n" + "=" * 76)
+        print(f"  {'SYMBOL':<12} {'LEV':>4} {'TRADES':>7} {'WIN%':>7} {'PNL':>12} {'DRAWDOWN':>10} {'SHARPE':>8}")
+        print("-" * 76)
         for m in summary:
             print(
-                f"  {m['symbol']:<12} {m['num_trades']:>7} "
+                f"  {m['symbol']:<12} x{m['leverage']:<3} {m['num_trades']:>7} "
                 f"{m['win_rate']:>6.1f}% {m['total_pnl']:>+12.2f} "
                 f"{m['max_drawdown']:>9.2f}% {m['sharpe_ratio']:>8.4f}"
             )
         total_pnl = sum(m["total_pnl"] for m in summary)
-        print("-" * 70)
-        print(f"  {'TOTAL':<12} {'':>7} {'':>7} {total_pnl:>+12.2f}")
-        print("=" * 70 + "\n")
+        print("-" * 76)
+        print(f"  {'TOTAL':<12} {'':>4} {'':>7} {'':>7} {total_pnl:>+12.2f}")
+        print("=" * 76 + "\n")
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +272,57 @@ def run_live(args, config) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Monitor — position watcher
+# ---------------------------------------------------------------------------
+
+def run_monitor(args, config) -> None:
+    """
+    Periodically check all open positions and send a Telegram alert
+    with unrealized PnL and available balance whenever positions exist.
+    """
+    interval = args.interval
+    client   = BitgetClient(config.api_key, config.secret, config.passphrase)
+    notifier = TelegramNotifier(config.telegram_token, config.telegram_chat_id)
+
+    print(f"[Monitor] Started — checking every {interval}s. Press Ctrl-C to stop.")
+    notifier.info(f"Position monitor started (interval: {interval}s)")
+
+    while True:
+        try:
+            now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
+            positions = client.get_all_positions(config.product_type)
+            open_pos  = [p for p in positions if float(p.get("total", 0)) != 0]
+
+            if open_pos:
+                account = client.get_account(config.margin_coin, config.product_type)
+                balance = float(account.get("available", 0))
+
+                print(f"\n[Monitor] [{now} UTC] {len(open_pos)} open position(s):")
+                for p in open_pos:
+                    upnl = p.get("unrealizedPL", "?")
+                    print(
+                        f"  {p.get('symbol')} {p.get('holdSide','?').upper()} "
+                        f"x{p.get('leverage','?')} | size={p.get('total')} | "
+                        f"entry={p.get('averageOpenPrice')} | mark={p.get('markPrice')} | "
+                        f"uPnL={upnl}"
+                    )
+                print(f"  Available balance: {balance:.4f} USDT")
+
+                notifier.position_update(open_pos, balance)
+            else:
+                print(f"[Monitor] [{now} UTC] No open positions.")
+
+        except BitgetAPIError as exc:
+            print(f"[Monitor] API error: {exc}")
+            notifier.error_alert("Monitor", str(exc))
+        except Exception as exc:
+            print(f"[Monitor] Unexpected error: {exc}")
+            notifier.error_alert("Monitor", str(exc))
+
+        time.sleep(interval)
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -268,6 +335,7 @@ def main() -> None:
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--live",     action="store_true", help="Run live trading loop")
     mode.add_argument("--backtest", action="store_true", help="Run backtesting engine")
+    mode.add_argument("--monitor",  action="store_true", help="Watch open positions and alert via Telegram")
 
     # Symbol selection — --symbols takes priority over --symbol
     sym_group = parser.add_mutually_exclusive_group()
@@ -281,20 +349,30 @@ def main() -> None:
         help="Single symbol (kept for backward compatibility)",
     )
 
-    parser.add_argument("--tf",      type=str, default=None,       help="Timeframe, e.g. 15m, 4H")
-    parser.add_argument("--limit",   type=int, default=1000,       help="Candles to fetch per symbol")
-    parser.add_argument("--out-dir", type=str, default="backtest", help="Directory to save backtest charts")
+    parser.add_argument("--tf",        type=str,   default=None,       help="Timeframe, e.g. 15m, 4H")
+    parser.add_argument("--limit",     type=int,   default=1000,       help="Candles to fetch per symbol")
+    parser.add_argument("--out-dir",   type=str,   default="backtest", help="Directory to save backtest charts")
+    parser.add_argument("--balance",   type=float, default=10000.0,    help="Starting balance for backtest (USDT)")
+    parser.add_argument("--interval",  type=int,   default=60,         help="Monitor check interval in seconds (default: 60)")
+    parser.add_argument("--leverages", type=str,   default=None,
+                        metavar="SYM=N,...",
+                        help="Per-symbol leverage overrides, e.g. BTCUSDT=8,ETHUSDT=6,SOLUSDT=4")
 
     args = parser.parse_args()
     config = load_config()
 
+    _needs_auth = args.live or args.monitor
+    if _needs_auth:
+        if not config.api_key or not config.secret or not config.passphrase:
+            print("[Error] This mode requires BITGET_API_KEY, BITGET_SECRET, BITGET_PASSPHRASE in .env")
+            sys.exit(1)
+
     if args.backtest:
         run_backtest(args, config)
     elif args.live:
-        if not config.api_key or not config.secret or not config.passphrase:
-            print("[Error] Live mode requires BITGET_API_KEY, BITGET_SECRET, BITGET_PASSPHRASE in .env")
-            sys.exit(1)
         run_live(args, config)
+    elif args.monitor:
+        run_monitor(args, config)
 
 
 if __name__ == "__main__":

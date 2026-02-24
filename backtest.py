@@ -170,47 +170,131 @@ def plot_results(
     trades: List[Trade],
     equity: List[float],
     output_path: str = "backtest_results.png",
+    config=None,
 ) -> None:
-    """Generate and save a two-panel chart: price+trades and equity curve."""
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(16, 10), sharex=False)
+    """
+    Generate and save a three-panel chart:
+      1. Price + EMA lines + trade markers (entry ▲/▼, exit ★TP / ✕SL / ○end)
+      2. Equity curve with drawdown fill
+      3. Per-trade PnL bar chart
+    """
+    closes = df["close"].astype(float)
+    ema_fast_p  = config.ema_fast  if config else 9
+    ema_slow_p  = config.ema_slow  if config else 21
+    ema_trend_p = config.ema_trend if config else 50
+    ema_fast_v  = closes.ewm(span=ema_fast_p,  adjust=False).mean().values
+    ema_slow_v  = closes.ewm(span=ema_slow_p,  adjust=False).mean().values
+    ema_trend_v = closes.ewm(span=ema_trend_p, adjust=False).mean().values
+
+    fig, (ax1, ax2, ax3) = plt.subplots(
+        3, 1, figsize=(20, 14),
+        gridspec_kw={"height_ratios": [3, 1.5, 1]},
+    )
     fig.patch.set_facecolor("#1a1a2e")
-    for ax in (ax1, ax2):
+    for ax in (ax1, ax2, ax3):
         ax.set_facecolor("#16213e")
         ax.tick_params(colors="white")
-        ax.spines["bottom"].set_color("#444")
-        ax.spines["top"].set_color("#444")
-        ax.spines["left"].set_color("#444")
-        ax.spines["right"].set_color("#444")
+        for spine in ax.spines.values():
+            spine.set_color("#444")
         ax.yaxis.label.set_color("white")
         ax.xaxis.label.set_color("white")
         ax.title.set_color("white")
 
-    # ---- Price chart ----
     bars = range(len(df))
-    closes = df["close"].astype(float).values
-    ax1.plot(bars, closes, color="#4fc3f7", linewidth=1, label="Close")
+    closes_arr = closes.values
+
+    # ------------------------------------------------------------------ #
+    # Panel 1 — Price + EMAs + trade markers
+    # ------------------------------------------------------------------ #
+    ax1.plot(bars, closes_arr, color="#4fc3f7", linewidth=1,   label="Close",                    alpha=0.8)
+    ax1.plot(bars, ema_fast_v, color="#00e5ff", linewidth=1.2, label=f"EMA{ema_fast_p}",         alpha=0.9)
+    ax1.plot(bars, ema_slow_v, color="#ff9800", linewidth=1.2, label=f"EMA{ema_slow_p}",         alpha=0.9)
+    ax1.plot(bars, ema_trend_v,color="#ce93d8", linewidth=1.5, label=f"EMA{ema_trend_p} (trend)", alpha=0.9)
+
+    # Outcome colours
+    _CLR = {"tp": "#00e676", "sl": "#ff1744", "end": "#ffd54f"}
+    _EXIT_MARKER = {"tp": "*", "sl": "X", "end": "o"}
 
     for trade in trades:
-        color = "#00e676" if trade.side == "buy" else "#ff1744"
-        ax1.axvline(x=trade.entry_bar, color=color, alpha=0.4, linewidth=0.8)
-        if trade.exit_bar is not None:
-            ax1.axvline(x=trade.exit_bar, color=color, alpha=0.2, linewidth=0.5)
-        marker = "^" if trade.side == "buy" else "v"
-        ax1.scatter(trade.entry_bar, trade.entry_price, marker=marker, color=color, s=60, zorder=5)
+        outcome   = trade.exit_reason or "end"
+        clr       = _CLR.get(outcome, "#ffffff")
+        entry_clr = "#00e676" if trade.side == "buy" else "#ff1744"
+        entry_mkr = "^"       if trade.side == "buy" else "v"
 
-    ax1.set_title("Price + Trades")
+        # Shaded region spanning the trade duration
+        if trade.exit_bar is not None:
+            ax1.axvspan(trade.entry_bar, trade.exit_bar, alpha=0.08, color=clr)
+
+        # Entry marker
+        ax1.scatter(trade.entry_bar, trade.entry_price,
+                    marker=entry_mkr, color=entry_clr, s=90, zorder=6)
+
+        # Exit marker + dashed connector
+        if trade.exit_bar is not None and trade.exit_price is not None:
+            ax1.scatter(trade.exit_bar, trade.exit_price,
+                        marker=_EXIT_MARKER.get(outcome, "o"),
+                        color=clr, s=110, zorder=6)
+            ax1.plot([trade.entry_bar, trade.exit_bar],
+                     [trade.entry_price, trade.exit_price],
+                     color=clr, linewidth=0.8, linestyle="--", alpha=0.5)
+
+    # Legend for outcome markers (proxy artists)
+    from matplotlib.lines import Line2D
+    legend_extra = [
+        Line2D([0], [0], marker="^", color="w", markerfacecolor="#00e676", markersize=8, label="Long entry",  linestyle="None"),
+        Line2D([0], [0], marker="v", color="w", markerfacecolor="#ff1744", markersize=8, label="Short entry", linestyle="None"),
+        Line2D([0], [0], marker="*", color="w", markerfacecolor="#00e676", markersize=10, label="TP exit",    linestyle="None"),
+        Line2D([0], [0], marker="X", color="w", markerfacecolor="#ff1744", markersize=8,  label="SL exit",    linestyle="None"),
+        Line2D([0], [0], marker="o", color="w", markerfacecolor="#ffd54f", markersize=8,  label="End exit",   linestyle="None"),
+    ]
+    handles, labels = ax1.get_legend_handles_labels()
+    ax1.legend(handles + legend_extra, labels + [h.get_label() for h in legend_extra],
+               facecolor="#16213e", labelcolor="white", fontsize=8,
+               loc="upper left", ncol=2)
+    ax1.set_title("Price + EMAs + Trades")
     ax1.set_ylabel("Price (USDT)")
-    ax1.legend(facecolor="#16213e", labelcolor="white")
     ax1.grid(color="#2a2a4a", linewidth=0.5)
 
-    # ---- Equity curve ----
-    eq_bars = range(len(equity))
-    ax2.plot(eq_bars, equity, color="#ffd54f", linewidth=1.5)
-    ax2.fill_between(eq_bars, equity, min(equity), alpha=0.2, color="#ffd54f")
+    # ------------------------------------------------------------------ #
+    # Panel 2 — Equity curve with drawdown shading
+    # ------------------------------------------------------------------ #
+    eq_arr  = np.array(equity, dtype=float)
+    eq_bars = range(len(eq_arr))
+    peak    = np.maximum.accumulate(eq_arr)
+
+    ax2.plot(eq_bars, eq_arr,  color="#ffd54f", linewidth=1.5, label="Balance")
+    ax2.plot(eq_bars, peak,    color="#888888", linewidth=0.8, linestyle="--", label="Peak")
+    ax2.fill_between(eq_bars, eq_arr, peak, alpha=0.25, color="#ff1744", label="Drawdown")
+    ax2.fill_between(eq_bars, eq_arr, eq_arr[0], where=eq_arr >= eq_arr[0],
+                     alpha=0.15, color="#00e676")
     ax2.set_title("Equity Curve")
     ax2.set_ylabel("Balance (USDT)")
-    ax2.set_xlabel("Bar")
+    ax2.legend(facecolor="#16213e", labelcolor="white", fontsize=8)
     ax2.grid(color="#2a2a4a", linewidth=0.5)
+
+    # ------------------------------------------------------------------ #
+    # Panel 3 — Per-trade PnL bars
+    # ------------------------------------------------------------------ #
+    if trades:
+        pnls   = [t.pnl for t in trades]
+        clrs   = [_CLR.get(t.exit_reason or "end", "#ffd54f") for t in trades]
+        x_pos  = range(len(pnls))
+        ax3.bar(x_pos, pnls, color=clrs, alpha=0.85, width=0.6)
+        ax3.axhline(0, color="#888888", linewidth=0.8)
+
+        # Label each bar with TP / SL / END
+        y_max = max(abs(p) for p in pnls) if pnls else 1
+        for i, trade in enumerate(trades):
+            label = (trade.exit_reason or "end").upper()
+            offset = y_max * 0.06
+            va = "bottom" if trade.pnl >= 0 else "top"
+            y  = trade.pnl + offset if trade.pnl >= 0 else trade.pnl - offset
+            ax3.text(i, y, label, ha="center", va=va, color="white", fontsize=7)
+
+        ax3.set_title("Per-Trade PnL")
+        ax3.set_ylabel("PnL (USDT)")
+        ax3.set_xlabel("Trade #")
+        ax3.grid(color="#2a2a4a", linewidth=0.5, axis="y")
 
     plt.tight_layout()
     plt.savefig(output_path, dpi=150, bbox_inches="tight")

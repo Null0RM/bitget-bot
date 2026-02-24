@@ -202,6 +202,12 @@ class BitgetClient:
         data = self._request("GET", "/api/v2/mix/position/allPosition", params=params)
         return data if isinstance(data, list) else []
 
+    def get_all_positions(self, product_type: str = "USDT-FUTURES") -> list:
+        """Return all open positions across every symbol."""
+        params = {"productType": product_type}
+        data = self._request("GET", "/api/v2/mix/position/allPosition", params=params)
+        return data if isinstance(data, list) else []
+
     def place_order(
         self,
         symbol: str,

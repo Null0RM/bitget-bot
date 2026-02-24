@@ -64,5 +64,38 @@ class TelegramNotifier:
         )
         self.send(msg)
 
+    def position_update(self, positions: list, balance: float) -> None:
+        """Send a summary of all open positions with unrealized PnL and account balance."""
+        lines = ["📊 *Open Positions Update*\n"]
+        total_upnl = 0.0
+
+        for p in positions:
+            symbol   = p.get("symbol", "?")
+            side     = p.get("holdSide", "?").upper()
+            size     = p.get("total", "?")
+            entry    = p.get("averageOpenPrice", "?")
+            mark     = p.get("markPrice", "?")
+            lev      = p.get("leverage", "?")
+            raw_upnl = p.get("unrealizedPL", "0")
+
+            try:
+                upnl_f = float(raw_upnl)
+                total_upnl += upnl_f
+                upnl_icon = "🟢" if upnl_f >= 0 else "🔴"
+                upnl_str  = f"{upnl_icon} `{upnl_f:+.4f} USDT`"
+            except (ValueError, TypeError):
+                upnl_str = f"`{raw_upnl}`"
+
+            lines.append(
+                f"*{symbol}* — {side} x{lev}\n"
+                f"  Size: `{size}` | Entry: `{entry}` | Mark: `{mark}`\n"
+                f"  Unrealized PnL: {upnl_str}\n"
+            )
+
+        total_icon = "🟢" if total_upnl >= 0 else "🔴"
+        lines.append(f"{total_icon} *Total Unrealized PnL:* `{total_upnl:+.4f} USDT`")
+        lines.append(f"💰 *Available Balance:* `{balance:.4f} USDT`")
+        self.send("\n".join(lines))
+
     def info(self, message: str) -> None:
         self.send(f"ℹ️ {message}")
