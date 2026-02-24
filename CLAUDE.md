@@ -2,12 +2,27 @@
 
 ## What Was Built
 
-A production-ready Bitget USDT-M perpetual futures trading bot using RSI+MACD strategy.
+A production-ready Bitget USDT-M perpetual futures trading bot using an EMA Crossover + RSI Momentum Filter strategy.
+
+## Strategy: EMA Trend Following
+
+Replaced the original RSI+MACD counter-trend reversal strategy with a trend-following approach:
+
+- **Long**: EMA9 crosses above EMA21 + price > EMA50 (uptrend) + RSI in [45, 70]
+- **Short**: EMA9 crosses below EMA21 + price < EMA50 (downtrend) + RSI in [30, 55]
+
+**Why the change**: The RSI+MACD strategy tried to catch reversals (buy oversold, sell overbought). In trending crypto markets this produced 0–25% win rates with very few signals. The EMA trend strategy trades *with* momentum, generates more signals (4–5× more trades), and achieved 45–50% win rates with positive PnL on ETH and HYPE.
+
+**Backtest comparison (4H, ~90 days, $10k starting balance)**:
+
+| Symbol | Old Trades | Old Win% | Old PnL | New Trades | New Win% | New PnL |
+|--------|-----------|---------|---------|-----------|---------|---------|
+| BTC | 3 | 0% | -297 | 16 | 31% | -115 |
+| ETH | 6 | 33% | -6 | 11 | 45% | +395 |
+| HYPE | 4 | 25% | -103 | 18 | 50% | +917 |
+| **Total** | | | **-406** | | | **+1197** |
 
 ## Key Implementation Decisions
-
-### RSI Lookback Window
-The strategy uses a 5-bar RSI lookback (`RSI_LOOKBACK=5`) to decouple RSI extreme timing from the MACD crossover. Without this, trades never trigger because RSI extreme and MACD crossover rarely coincide on the exact same bar.
 
 ### Position Sizing (No Leverage Multiplier)
 ```
@@ -38,9 +53,9 @@ Live mode spawns one daemon thread per symbol. A shared `threading.Lock` seriali
 
 | Symbol   | Trades | Win%  | PnL       | Drawdown | Sharpe  |
 |----------|--------|-------|-----------|----------|---------|
-| BTCUSDT  | 3      | 0.0%  | -297.01   | 2.97%    | -1.1876 |
-| ETHUSDT  | 6      | 33.3% | -5.96     | 1.99%    | -0.0000 |
-| HYPEUSDT | 4      | 25.0% | -102.93   | 1.99%    | -0.2584 |
+| BTCUSDT  | 16     | 31.2% | -114.74   | 6.82%    | -0.1228 |
+| ETHUSDT  | 11     | 45.5% | +394.70   | 3.94%    | +0.5367 |
+| HYPEUSDT | 18     | 50.0% | +917.39   | 2.97%    | +0.9189 |
 
 ## Repository
 

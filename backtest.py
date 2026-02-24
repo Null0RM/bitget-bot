@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
 from config import Config
-from strategy import RSIMACDStrategy
+from strategy import EMATrendStrategy
 from risk_manager import RiskManager
 
 
@@ -34,7 +34,7 @@ class BacktestEngine:
     def run(
         self,
         df: pd.DataFrame,
-        strategy: RSIMACDStrategy,
+        strategy: EMATrendStrategy,
         risk_manager: RiskManager,
         config: Config,
         initial_balance: float = 10_000.0,
@@ -51,7 +51,7 @@ class BacktestEngine:
         self.trades = []
         open_trade: Optional[Trade] = None
 
-        min_bars = config.macd_slow + config.macd_signal + 5
+        min_bars = config.ema_trend + 5
 
         for i in range(1, len(df)):
             bar = df.iloc[i]

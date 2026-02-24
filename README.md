@@ -1,12 +1,12 @@
-# Bitget RSI+MACD Futures Trading Bot
+# Bitget EMA Trend Futures Trading Bot
 
-A production-ready Python trading bot for **USDT-M perpetual futures** on [Bitget](https://www.bitget.com), using a combined **RSI + MACD** strategy with risk-managed position sizing, a bar-by-bar backtesting engine, and **Telegram trade alerts**.
+A production-ready Python trading bot for **USDT-M perpetual futures** on [Bitget](https://www.bitget.com), using an **EMA Crossover + RSI Momentum Filter** strategy with risk-managed position sizing, a bar-by-bar backtesting engine, and **Telegram trade alerts**.
 
 ---
 
 ## Features
 
-- **RSI + MACD strategy** — Enters longs when RSI was recently oversold and MACD crosses up; enters shorts when RSI was recently overbought and MACD crosses down
+- **EMA Crossover + RSI Filter strategy** — Enters longs when EMA9 crosses above EMA21 with price above EMA50 and RSI confirming upside momentum; enters shorts on the mirror condition
 - **Risk-based position sizing** — Risks a fixed % of balance per trade; stop-loss and take-profit calculated automatically
 - **Backtesting engine** — Simulates bar-by-bar with SL/TP logic, outputs win rate, PnL, max drawdown, Sharpe ratio, and an equity curve chart
 - **Multi-symbol support** — Backtest or trade multiple coins in one command; live mode runs each symbol in its own thread
@@ -70,16 +70,17 @@ RISK_PCT=1.0       # % of balance to risk per trade
 SL_PCT=2.0         # stop-loss distance from entry (%)
 TP_PCT=4.0         # take-profit distance from entry (%)
 
-# RSI
+# RSI (momentum filter, not reversal signal)
 RSI_PERIOD=14
-RSI_OVERSOLD=30
-RSI_OVERBOUGHT=70
-RSI_LOOKBACK=5     # bars to look back for RSI extreme before MACD crossover
+RSI_LONG_MIN=45    # RSI must be above this to enter a long
+RSI_LONG_MAX=70    # RSI must be below this to enter a long (not overbought)
+RSI_SHORT_MIN=30   # RSI must be above this to enter a short (not oversold)
+RSI_SHORT_MAX=55   # RSI must be below this to enter a short
 
-# MACD
-MACD_FAST=12
-MACD_SLOW=26
-MACD_SIGNAL=9
+# EMA crossover periods
+EMA_FAST=9
+EMA_SLOW=21
+EMA_TREND=50       # trend direction filter
 ```
 
 ---
@@ -112,11 +113,11 @@ python bot.py --backtest --symbols BTCUSDT,ETHUSDT --tf 4H --out-dir results/
 ======================================================================
   SYMBOL        TRADES    WIN%          PNL   DRAWDOWN   SHARPE
 ----------------------------------------------------------------------
-  BTCUSDT            3    0.0%      -297.01      2.97%  -1.1876
-  ETHUSDT            6   33.3%        -5.96      1.99%  -0.0000
-  HYPEUSDT           4   25.0%      -102.93      1.99%  -0.2584
+  BTCUSDT           16   31.2%      -114.74      6.82%  -0.1228
+  ETHUSDT           11   45.5%      +394.70      3.94%   0.5367
+  HYPEUSDT          18   50.0%      +917.39      2.97%   0.9189
 ----------------------------------------------------------------------
-  TOTAL                             -405.90
+  TOTAL                            +1197.35
 ======================================================================
 ```
 
@@ -144,10 +145,14 @@ python bot.py --live --symbols BTCUSDT,ETHUSDT,SOLUSDT --tf 15m
 
 | Signal | Condition |
 |--------|-----------|
-| **BUY** | RSI was below `RSI_OVERSOLD` within the last `RSI_LOOKBACK` bars **AND** MACD line crosses above signal line |
-| **SELL** | RSI was above `RSI_OVERBOUGHT` within the last `RSI_LOOKBACK` bars **AND** MACD line crosses below signal line |
+| **BUY** | EMA9 crosses **above** EMA21 **AND** close > EMA50 **AND** `RSI_LONG_MIN` ≤ RSI ≤ `RSI_LONG_MAX` |
+| **SELL** | EMA9 crosses **below** EMA21 **AND** close < EMA50 **AND** `RSI_SHORT_MIN` ≤ RSI ≤ `RSI_SHORT_MAX` |
 
-The `RSI_LOOKBACK` window (default 5 bars) allows the MACD crossover confirmation to occur slightly after the RSI extreme — which is how this setup is used in practice. RSI flags the exhaustion zone; MACD confirms the momentum turn.
+This is a **trend-following** strategy:
+
+- **EMA crossover (9/21)** detects the momentum shift — the fast EMA crossing the slow EMA signals that short-term momentum has changed direction.
+- **EMA trend filter (50)** ensures you only trade in the direction of the prevailing trend. Longs require price above EMA50; shorts require price below it.
+- **RSI momentum filter** avoids entering when momentum is already exhausted. For longs, RSI must be in `[45, 70]` — confirming bullish momentum without being overbought. For shorts, RSI must be in `[30, 55]`.
 
 ### Risk Management
 

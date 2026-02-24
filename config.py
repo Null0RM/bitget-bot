@@ -28,16 +28,17 @@ class Config:
     sl_pct: float = field(default_factory=lambda: float(os.getenv("SL_PCT", "2.0")))
     tp_pct: float = field(default_factory=lambda: float(os.getenv("TP_PCT", "4.0")))
 
-    # RSI parameters
+    # RSI parameters (used as momentum filter, not reversal signal)
     rsi_period: int = field(default_factory=lambda: int(os.getenv("RSI_PERIOD", "14")))
-    rsi_oversold: float = field(default_factory=lambda: float(os.getenv("RSI_OVERSOLD", "30")))
-    rsi_overbought: float = field(default_factory=lambda: float(os.getenv("RSI_OVERBOUGHT", "70")))
-    rsi_lookback: int = field(default_factory=lambda: int(os.getenv("RSI_LOOKBACK", "5")))
+    rsi_long_min: float = field(default_factory=lambda: float(os.getenv("RSI_LONG_MIN", "45.0")))
+    rsi_long_max: float = field(default_factory=lambda: float(os.getenv("RSI_LONG_MAX", "70.0")))
+    rsi_short_min: float = field(default_factory=lambda: float(os.getenv("RSI_SHORT_MIN", "30.0")))
+    rsi_short_max: float = field(default_factory=lambda: float(os.getenv("RSI_SHORT_MAX", "55.0")))
 
-    # MACD parameters
-    macd_fast: int = field(default_factory=lambda: int(os.getenv("MACD_FAST", "12")))
-    macd_slow: int = field(default_factory=lambda: int(os.getenv("MACD_SLOW", "26")))
-    macd_signal: int = field(default_factory=lambda: int(os.getenv("MACD_SIGNAL", "9")))
+    # EMA parameters
+    ema_fast: int = field(default_factory=lambda: int(os.getenv("EMA_FAST", "9")))
+    ema_slow: int = field(default_factory=lambda: int(os.getenv("EMA_SLOW", "21")))
+    ema_trend: int = field(default_factory=lambda: int(os.getenv("EMA_TREND", "50")))
 
 
 def load_config() -> Config:

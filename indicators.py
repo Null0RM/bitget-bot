@@ -1,4 +1,4 @@
-from typing import Optional, Tuple
+from typing import Optional
 import pandas as pd
 import numpy as np
 
@@ -17,63 +17,52 @@ def calculate_rsi(closes: pd.Series, period: int = 14) -> pd.Series:
     return rsi
 
 
-def calculate_macd(
-    closes: pd.Series,
-    fast: int = 12,
-    slow: int = 26,
-    signal: int = 9,
-) -> Tuple[pd.Series, pd.Series, pd.Series]:
-    """Return (macd_line, signal_line, histogram)."""
-    ema_fast = closes.ewm(span=fast, adjust=False).mean()
-    ema_slow = closes.ewm(span=slow, adjust=False).mean()
-    macd_line = ema_fast - ema_slow
-    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
-    histogram = macd_line - signal_line
-    return macd_line, signal_line, histogram
+def calculate_ema(closes: pd.Series, period: int) -> pd.Series:
+    """Exponential moving average."""
+    return closes.ewm(span=period, adjust=False).mean()
 
 
 def generate_signal(
+    closes: pd.Series,
     rsi: pd.Series,
-    macd_line: pd.Series,
-    signal_line: pd.Series,
-    rsi_oversold: float = 30.0,
-    rsi_overbought: float = 70.0,
-    rsi_lookback: int = 5,
+    ema_fast: pd.Series,
+    ema_slow: pd.Series,
+    ema_trend: pd.Series,
+    rsi_long_min: float = 45.0,
+    rsi_long_max: float = 70.0,
+    rsi_short_min: float = 30.0,
+    rsi_short_max: float = 55.0,
 ) -> Optional[str]:
     """
-    Generate a trading signal using a short RSI lookback window.
+    EMA crossover strategy with trend filter and RSI momentum confirmation.
 
-    BUY:  RSI was below oversold within the last `rsi_lookback` bars
-          AND MACD crosses above signal on the current bar.
+    Long  (buy):  EMA_fast crosses above EMA_slow
+                  AND price > EMA_trend  (confirmed uptrend)
+                  AND RSI in [rsi_long_min, rsi_long_max]  (momentum up, not overbought)
 
-    SELL: RSI was above overbought within the last `rsi_lookback` bars
-          AND MACD crosses below signal on the current bar.
-
-    The lookback window lets the MACD crossover (momentum confirmation)
-    occur 1-N bars after the RSI extreme, which is how this setup is
-    used in practice — RSI flags the exhaustion zone, MACD confirms the turn.
+    Short (sell): EMA_fast crosses below EMA_slow
+                  AND price < EMA_trend  (confirmed downtrend)
+                  AND RSI in [rsi_short_min, rsi_short_max]  (momentum down, not oversold)
 
     Returns 'buy', 'sell', or None.
     """
-    lookback = max(2, rsi_lookback + 1)
-    if len(rsi) < lookback or len(macd_line) < 2:
+    if len(ema_fast) < 2:
         return None
 
-    macd_curr = macd_line.iloc[-1]
-    macd_prev = macd_line.iloc[-2]
-    sig_curr = signal_line.iloc[-1]
-    sig_prev = signal_line.iloc[-2]
+    prev_fast, curr_fast = float(ema_fast.iloc[-2]), float(ema_fast.iloc[-1])
+    prev_slow, curr_slow = float(ema_slow.iloc[-2]), float(ema_slow.iloc[-1])
+    curr_trend = float(ema_trend.iloc[-1])
+    curr_price = float(closes.iloc[-1])
+    curr_rsi = float(rsi.iloc[-1])
 
-    macd_crossed_up = macd_prev <= sig_prev and macd_curr > sig_curr
-    macd_crossed_down = macd_prev >= sig_prev and macd_curr < sig_curr
+    if pd.isna(curr_rsi) or pd.isna(curr_trend):
+        return None
 
-    # RSI condition: was extreme within the lookback window
-    rsi_window = rsi.iloc[-rsi_lookback:]
-    rsi_was_oversold = bool((rsi_window < rsi_oversold).any())
-    rsi_was_overbought = bool((rsi_window > rsi_overbought).any())
+    crossed_up   = prev_fast <= prev_slow and curr_fast > curr_slow
+    crossed_down = prev_fast >= prev_slow and curr_fast < curr_slow
 
-    if rsi_was_oversold and macd_crossed_up:
+    if crossed_up and curr_price > curr_trend and rsi_long_min <= curr_rsi <= rsi_long_max:
         return "buy"
-    if rsi_was_overbought and macd_crossed_down:
+    if crossed_down and curr_price < curr_trend and rsi_short_min <= curr_rsi <= rsi_short_max:
         return "sell"
     return None

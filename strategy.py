@@ -1,11 +1,11 @@
 from typing import Optional
 import pandas as pd
 
-from indicators import calculate_rsi, calculate_macd, generate_signal
+from indicators import calculate_rsi, calculate_ema, generate_signal
 from config import Config
 
 
-class RSIMACDStrategy:
+class EMATrendStrategy:
     def __init__(self, config: Config):
         self.config = config
 
@@ -17,43 +17,43 @@ class RSIMACDStrategy:
 
         Returns:
             {
-                "side": "buy" | "sell",
+                "side":        "buy" | "sell",
                 "entry_price": float,   # last close
-                "rsi": float,
-                "macd": float,
-                "macd_signal": float,
+                "rsi":         float,
+                "ema_fast":    float,
+                "ema_slow":    float,
             }
             or None if no signal.
         """
-        if len(df) < self.config.macd_slow + self.config.macd_signal + 5:
+        if len(df) < self.config.ema_trend + 5:
             return None
 
         closes = df["close"].astype(float)
 
-        rsi = calculate_rsi(closes, self.config.rsi_period)
-        macd_line, signal_line, _ = calculate_macd(
-            closes,
-            self.config.macd_fast,
-            self.config.macd_slow,
-            self.config.macd_signal,
-        )
+        rsi       = calculate_rsi(closes, self.config.rsi_period)
+        ema_fast  = calculate_ema(closes, self.config.ema_fast)
+        ema_slow  = calculate_ema(closes, self.config.ema_slow)
+        ema_trend = calculate_ema(closes, self.config.ema_trend)
 
         side = generate_signal(
+            closes,
             rsi,
-            macd_line,
-            signal_line,
-            self.config.rsi_oversold,
-            self.config.rsi_overbought,
-            self.config.rsi_lookback,
+            ema_fast,
+            ema_slow,
+            ema_trend,
+            self.config.rsi_long_min,
+            self.config.rsi_long_max,
+            self.config.rsi_short_min,
+            self.config.rsi_short_max,
         )
 
         if side is None:
             return None
 
         return {
-            "side": side,
+            "side":        side,
             "entry_price": float(closes.iloc[-1]),
-            "rsi": float(rsi.iloc[-1]),
-            "macd": float(macd_line.iloc[-1]),
-            "macd_signal": float(signal_line.iloc[-1]),
+            "rsi":         float(rsi.iloc[-1]),
+            "ema_fast":    float(ema_fast.iloc[-1]),
+            "ema_slow":    float(ema_slow.iloc[-1]),
         }

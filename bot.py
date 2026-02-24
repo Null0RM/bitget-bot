@@ -22,7 +22,7 @@ import pandas as pd
 
 from config import load_config
 from bitget_client import BitgetClient, BitgetAPIError
-from strategy import RSIMACDStrategy
+from strategy import EMATrendStrategy
 from risk_manager import RiskManager
 from telegram_notifier import TelegramNotifier
 from backtest import BacktestEngine, plot_results
@@ -84,7 +84,7 @@ def run_backtest(args, config) -> None:
     os.makedirs(out_dir, exist_ok=True)
 
     client = BitgetClient(config.api_key, config.secret, config.passphrase)
-    strategy = RSIMACDStrategy(config)
+    strategy = EMATrendStrategy(config)
     risk_manager = RiskManager(config.risk_pct, config.sl_pct, config.tp_pct, config.leverage)
 
     summary = []  # collect per-symbol metrics for the aggregate table
@@ -131,7 +131,7 @@ def _live_symbol_loop(
     limit: int,
     config,
     client: BitgetClient,
-    strategy: RSIMACDStrategy,
+    strategy: EMATrendStrategy,
     risk_manager: RiskManager,
     notifier: TelegramNotifier,
     order_lock: threading.Lock,
@@ -194,7 +194,7 @@ def _live_symbol_loop(
                 notifier.trade_opened(
                     symbol=symbol, side=side, entry=entry, size=size,
                     sl=sl_price, tp=tp_price,
-                    rsi=signal["rsi"], macd=signal["macd"],
+                    rsi=signal["rsi"], ema_fast=signal["ema_fast"], ema_slow=signal["ema_slow"],
                 )
             else:
                 reason = "position open" if has_open else "no signal"
@@ -225,7 +225,7 @@ def run_live(args, config) -> None:
     print(f"[Live] Starting bot | symbols: {', '.join(symbols)} | tf: {tf}")
 
     client = BitgetClient(config.api_key, config.secret, config.passphrase)
-    strategy = RSIMACDStrategy(config)
+    strategy = EMATrendStrategy(config)
     risk_manager = RiskManager(config.risk_pct, config.sl_pct, config.tp_pct, config.leverage)
     notifier = TelegramNotifier(config.telegram_token, config.telegram_chat_id)
     order_lock = threading.Lock()
