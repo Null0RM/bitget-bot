@@ -24,7 +24,7 @@ class Config:
     leverage: int = field(default_factory=lambda: int(os.getenv("LEVERAGE", "5")))
 
     # Risk management
-    risk_pct: float = field(default_factory=lambda: float(os.getenv("RISK_PCT", "1.0")))
+    collateral_pct: float = field(default_factory=lambda: float(os.getenv("COLLATERAL_PCT", "10.0")))
     sl_pct: float = field(default_factory=lambda: float(os.getenv("SL_PCT", "2.0")))
     tp_pct: float = field(default_factory=lambda: float(os.getenv("TP_PCT", "4.0")))
 

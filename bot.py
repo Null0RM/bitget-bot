@@ -100,11 +100,12 @@ def run_backtest(args, config) -> None:
     client = BitgetClient(config.api_key, config.secret, config.passphrase)
     strategy = EMATrendStrategy(config)
 
-    summary = []  # collect per-symbol metrics for the aggregate table
+    summary     = []   # per-symbol metrics for the aggregate table
+    all_results = []   # collected for the combined chart
 
     for symbol in symbols:
         lev = leverage_map[symbol]
-        risk_manager = RiskManager(config.risk_pct, config.sl_pct, config.tp_pct, lev)
+        risk_manager = RiskManager(config.collateral_pct, config.sl_pct, config.tp_pct, lev)
 
         print(f"\n[Backtest] Fetching {limit} candles for {symbol} {tf} (x{lev} leverage) ...")
         candles = client.get_candles(symbol, tf, limit)
@@ -115,10 +116,19 @@ def run_backtest(args, config) -> None:
         metrics = engine.run(df, strategy, risk_manager, config, initial_balance=balance)
         print_metrics(metrics, symbol, tf, lev, balance)
 
-        chart_file = os.path.join(out_dir, f"backtest_{symbol}.png")
-        plot_results(df, engine.trades, engine.equity_curve, output_path=chart_file, config=config)
-
+        all_results.append({
+            "symbol":   symbol,
+            "df":       df,
+            "trades":   engine.trades,
+            "equity":   engine.equity_curve,
+            "leverage": lev,
+        })
         summary.append({"symbol": symbol, "leverage": lev, **metrics})
+
+    # Single combined chart named backtest_{SYMBOLS}_{TF}.png
+    symbols_tag = "_".join(symbols)
+    chart_file  = os.path.join(out_dir, f"backtest_{symbols_tag}_{tf}.png")
+    plot_results(all_results, tf, output_path=chart_file, config=config)
 
     # Aggregate summary table when multiple symbols were run
     if len(summary) > 1:
@@ -242,7 +252,7 @@ def run_live(args, config) -> None:
 
     client = BitgetClient(config.api_key, config.secret, config.passphrase)
     strategy = EMATrendStrategy(config)
-    risk_manager = RiskManager(config.risk_pct, config.sl_pct, config.tp_pct, config.leverage)
+    risk_manager = RiskManager(config.collateral_pct, config.sl_pct, config.tp_pct, config.leverage)
     notifier = TelegramNotifier(config.telegram_token, config.telegram_chat_id)
     order_lock = threading.Lock()
 

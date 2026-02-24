@@ -2,35 +2,28 @@ from typing import Tuple
 
 
 class RiskManager:
-    def __init__(self, risk_pct: float, sl_pct: float, tp_pct: float, leverage: int = 1):
-        self.risk_pct = risk_pct      # % of balance to risk per trade
-        self.sl_pct = sl_pct          # stop-loss distance %
-        self.tp_pct = tp_pct          # take-profit distance %
+    def __init__(self, collateral_pct: float, sl_pct: float, tp_pct: float, leverage: int = 1):
+        self.collateral_pct = collateral_pct  # % of balance to use as collateral per trade
+        self.sl_pct  = sl_pct                 # stop-loss distance %
+        self.tp_pct  = tp_pct                 # take-profit distance %
         self.leverage = leverage
 
     def calculate_position_size(self, balance: float, price: float) -> float:
         """
-        Calculate notional position size in base currency units.
+        Collateral-based position sizing.
 
-        Risk-based formula:
-            risk_amount = balance * (risk_pct / 100)   # e.g. $100 on $10k account
-            sl_distance = price * (sl_pct / 100)       # $ move to stop-loss
-            quantity    = risk_amount / sl_distance     # units where 1-tick loss = risk_amount
-
-        Leverage is NOT multiplied here because `size * price_change` already gives
-        the full P&L on the notional.  Leverage determines how much margin the exchange
-        requires, not how large the position is for P&L purposes.
+            collateral = balance * (collateral_pct / 100)   e.g. 10% of $50 = $5
+            notional   = collateral * leverage              e.g. $5 * 8 = $40
+            quantity   = notional / price                   e.g. $40 / $95000 = 0.000421 BTC
         """
         if price <= 0:
             return 0.0
-        risk_amount = balance * (self.risk_pct / 100)
-        sl_distance = price * (self.sl_pct / 100)
-        quantity = risk_amount / sl_distance
+        collateral = balance * (self.collateral_pct / 100)
+        notional   = collateral * self.leverage
+        quantity   = notional / price
         return round(quantity, 6)
 
-    def calculate_sl_tp(
-        self, entry: float, side: str
-    ) -> Tuple[float, float]:
+    def calculate_sl_tp(self, entry: float, side: str) -> Tuple[float, float]:
         """
         Return (sl_price, tp_price) for a given entry and side.
 
