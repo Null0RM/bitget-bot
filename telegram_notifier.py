@@ -29,9 +29,7 @@ class TelegramNotifier:
         size: float,
         sl: float,
         tp: float,
-        rsi: float,
-        ema_fast: float,
-        ema_slow: float,
+        pattern: str,
     ) -> None:
         icon = "🟢" if side.lower() == "buy" else "🔴"
         msg = (
@@ -42,7 +40,7 @@ class TelegramNotifier:
             f"Size: `{size}`\n"
             f"Stop-Loss: `{sl}`\n"
             f"Take-Profit: `{tp}`\n"
-            f"RSI: `{rsi:.2f}` | EMA9: `{ema_fast:.4f}` | EMA21: `{ema_slow:.4f}`"
+            f"Pattern: `{pattern}`"
         )
         self.send(msg)
 

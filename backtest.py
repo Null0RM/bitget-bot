@@ -8,8 +8,9 @@ import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
 
 from config import Config
-from strategy import EMATrendStrategy
+from strategy import HolisticStrategy
 from risk_manager import RiskManager
+from indicators import find_sr_levels, calculate_ema
 
 
 @dataclass
@@ -24,6 +25,7 @@ class Trade:
     exit_price: Optional[float] = None
     exit_reason: Optional[str] = None  # 'sl', 'tp', 'end'
     pnl: float = 0.0
+    pattern: Optional[str] = None      # candle pattern that triggered entry
 
 
 class BacktestEngine:
@@ -34,7 +36,7 @@ class BacktestEngine:
     def run(
         self,
         df: pd.DataFrame,
-        strategy: EMATrendStrategy,
+        strategy: HolisticStrategy,
         risk_manager: RiskManager,
         config: Config,
         initial_balance: float = 10_000.0,
@@ -51,7 +53,7 @@ class BacktestEngine:
         self.trades = []
         open_trade: Optional[Trade] = None
 
-        min_bars = config.ema_trend + 5
+        min_bars = config.sr_lookback + config.sr_swing_n + 5
 
         for i in range(1, len(df)):
             bar = df.iloc[i]
@@ -102,6 +104,7 @@ class BacktestEngine:
                         size=size,
                         sl_price=sl_price,
                         tp_price=tp_price,
+                        pattern=signal.get("pattern"),
                     )
 
             self.equity_curve.append(balance)
@@ -184,8 +187,6 @@ def plot_results(
     _CLR         = {"tp": "#00e676", "sl": "#ff1744", "end": "#ffd54f"}
     _EXIT_MARKER = {"tp": "*",       "sl": "X",       "end": "o"}
 
-    ema_fast_p  = config.ema_fast  if config else 9
-    ema_slow_p  = config.ema_slow  if config else 21
     ema_trend_p = config.ema_trend if config else 50
 
     n = len(results)
@@ -217,21 +218,43 @@ def plot_results(
         lev    = res.get("leverage", 1)
 
         closes      = df["close"].astype(float)
-        ema_fast_v  = closes.ewm(span=ema_fast_p,  adjust=False).mean().values
-        ema_slow_v  = closes.ewm(span=ema_slow_p,  adjust=False).mean().values
         ema_trend_v = closes.ewm(span=ema_trend_p, adjust=False).mean().values
         closes_arr  = closes.values
         bars        = range(len(df))
 
+        # S/R levels from the full df for this symbol
+        if config is not None:
+            try:
+                sup_lvls, res_lvls = find_sr_levels(
+                    df,
+                    lookback=config.sr_lookback,
+                    swing_n=config.sr_swing_n,
+                    tolerance=config.sr_touch_tolerance,
+                    min_touches=config.sr_min_touches,
+                )
+            except Exception:
+                sup_lvls, res_lvls = [], []
+        else:
+            sup_lvls, res_lvls = [], []
+
         ax1, ax2, ax3 = axes[0][col], axes[1][col], axes[2][col]
 
         # --------------------------------------------------------- #
-        # Row 0 — Price + EMAs + trade markers
+        # Row 0 — Price + EMA trend + S/R levels + trade markers
         # --------------------------------------------------------- #
-        ax1.plot(bars, closes_arr,  color="#4fc3f7", linewidth=1,   label="Close",               alpha=0.8)
-        ax1.plot(bars, ema_fast_v,  color="#00e5ff", linewidth=1.2, label=f"EMA{ema_fast_p}",    alpha=0.9)
-        ax1.plot(bars, ema_slow_v,  color="#ff9800", linewidth=1.2, label=f"EMA{ema_slow_p}",    alpha=0.9)
-        ax1.plot(bars, ema_trend_v, color="#ce93d8", linewidth=1.5, label=f"EMA{ema_trend_p}",   alpha=0.9)
+        ax1.plot(bars, closes_arr,  color="#4fc3f7", linewidth=1,   label="Close",                alpha=0.8)
+        ax1.plot(bars, ema_trend_v, color="#ce93d8", linewidth=1.8, label=f"EMA{ema_trend_p} trend", alpha=0.95)
+
+        # S/R horizontal lines
+        for lvl in sup_lvls:
+            ax1.axhline(lvl, color="#00e676", linewidth=0.8, linestyle="--", alpha=0.55)
+        for lvl in res_lvls:
+            ax1.axhline(lvl, color="#ff1744", linewidth=0.8, linestyle="--", alpha=0.55)
+
+        _PATTERN_ABBR = {
+            "bullish_engulfing": "BullEng", "bearish_engulfing": "BearEng",
+            "hammer": "Hmr", "shooting_star": "ShStar", "doji": "Doji",
+        }
 
         for trade in trades:
             outcome   = trade.exit_reason or "end"
@@ -242,7 +265,15 @@ def plot_results(
             if trade.exit_bar is not None:
                 ax1.axvspan(trade.entry_bar, trade.exit_bar, alpha=0.08, color=clr)
             ax1.scatter(trade.entry_bar, trade.entry_price,
-                        marker=entry_mkr, color=entry_clr, s=70, zorder=6)
+                        marker=entry_mkr, color=entry_clr, s=80, zorder=6)
+            # Pattern label above/below entry marker
+            if trade.pattern:
+                abbr   = _PATTERN_ABBR.get(trade.pattern, trade.pattern)
+                offset = trade.entry_price * 0.003
+                va     = "bottom" if trade.side == "buy" else "top"
+                y      = trade.entry_price + offset if trade.side == "buy" else trade.entry_price - offset
+                ax1.text(trade.entry_bar, y, abbr, color=entry_clr,
+                         fontsize=5.5, ha="center", va=va, zorder=7)
             if trade.exit_bar is not None and trade.exit_price is not None:
                 ax1.scatter(trade.exit_bar, trade.exit_price,
                             marker=_EXIT_MARKER.get(outcome, "o"),
@@ -252,14 +283,16 @@ def plot_results(
                          color=clr, linewidth=0.7, linestyle="--", alpha=0.4)
 
         legend_extra = [
+            Line2D([0],[0], color="#ce93d8", linewidth=1.8,  label=f"EMA{ema_trend_p}"),
+            Line2D([0],[0], color="#00e676", linewidth=0.8,  linestyle="--", label="Support"),
+            Line2D([0],[0], color="#ff1744", linewidth=0.8,  linestyle="--", label="Resistance"),
             Line2D([0],[0], marker="^", color="w", markerfacecolor="#00e676", markersize=7, label="Long",  linestyle="None"),
             Line2D([0],[0], marker="v", color="w", markerfacecolor="#ff1744", markersize=7, label="Short", linestyle="None"),
             Line2D([0],[0], marker="*", color="w", markerfacecolor="#00e676", markersize=9, label="TP",    linestyle="None"),
             Line2D([0],[0], marker="X", color="w", markerfacecolor="#ff1744", markersize=7, label="SL",    linestyle="None"),
             Line2D([0],[0], marker="o", color="w", markerfacecolor="#ffd54f", markersize=7, label="End",   linestyle="None"),
         ]
-        handles, labels = ax1.get_legend_handles_labels()
-        ax1.legend(handles + legend_extra, labels + [h.get_label() for h in legend_extra],
+        ax1.legend(legend_extra, [h.get_label() for h in legend_extra],
                    facecolor="#16213e", labelcolor="white", fontsize=7,
                    loc="upper left", ncol=2)
         ax1.set_title(f"{symbol} / {tf}  (x{lev})", fontsize=11)

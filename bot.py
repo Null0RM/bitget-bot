@@ -22,7 +22,7 @@ import pandas as pd
 
 from config import load_config
 from bitget_client import BitgetClient, BitgetAPIError
-from strategy import EMATrendStrategy
+from strategy import HolisticStrategy
 from risk_manager import RiskManager
 from telegram_notifier import TelegramNotifier
 from backtest import BacktestEngine, plot_results
@@ -98,7 +98,7 @@ def run_backtest(args, config) -> None:
     os.makedirs(out_dir, exist_ok=True)
 
     client = BitgetClient(config.api_key, config.secret, config.passphrase)
-    strategy = EMATrendStrategy(config)
+    strategy = HolisticStrategy(config)
 
     summary     = []   # per-symbol metrics for the aggregate table
     all_results = []   # collected for the combined chart
@@ -157,7 +157,7 @@ def _live_symbol_loop(
     limit: int,
     config,
     client: BitgetClient,
-    strategy: EMATrendStrategy,
+    strategy: HolisticStrategy,
     risk_manager: RiskManager,
     notifier: TelegramNotifier,
     order_lock: threading.Lock,
@@ -220,7 +220,7 @@ def _live_symbol_loop(
                 notifier.trade_opened(
                     symbol=symbol, side=side, entry=entry, size=size,
                     sl=sl_price, tp=tp_price,
-                    rsi=signal["rsi"], ema_fast=signal["ema_fast"], ema_slow=signal["ema_slow"],
+                    pattern=signal["pattern"],
                 )
             else:
                 reason = "position open" if has_open else "no signal"
@@ -251,7 +251,7 @@ def run_live(args, config) -> None:
     print(f"[Live] Starting bot | symbols: {', '.join(symbols)} | tf: {tf}")
 
     client = BitgetClient(config.api_key, config.secret, config.passphrase)
-    strategy = EMATrendStrategy(config)
+    strategy = HolisticStrategy(config)
     risk_manager = RiskManager(config.collateral_pct, config.sl_pct, config.tp_pct, config.leverage)
     notifier = TelegramNotifier(config.telegram_token, config.telegram_chat_id)
     order_lock = threading.Lock()

@@ -28,17 +28,15 @@ class Config:
     sl_pct: float = field(default_factory=lambda: float(os.getenv("SL_PCT", "2.0")))
     tp_pct: float = field(default_factory=lambda: float(os.getenv("TP_PCT", "4.0")))
 
-    # RSI parameters (used as momentum filter, not reversal signal)
-    rsi_period: int = field(default_factory=lambda: int(os.getenv("RSI_PERIOD", "14")))
-    rsi_long_min: float = field(default_factory=lambda: float(os.getenv("RSI_LONG_MIN", "45.0")))
-    rsi_long_max: float = field(default_factory=lambda: float(os.getenv("RSI_LONG_MAX", "70.0")))
-    rsi_short_min: float = field(default_factory=lambda: float(os.getenv("RSI_SHORT_MIN", "30.0")))
-    rsi_short_max: float = field(default_factory=lambda: float(os.getenv("RSI_SHORT_MAX", "55.0")))
-
-    # EMA parameters
-    ema_fast: int = field(default_factory=lambda: int(os.getenv("EMA_FAST", "9")))
-    ema_slow: int = field(default_factory=lambda: int(os.getenv("EMA_SLOW", "21")))
+    # Trend direction
     ema_trend: int = field(default_factory=lambda: int(os.getenv("EMA_TREND", "50")))
+
+    # Support / Resistance detection
+    sr_lookback: int = field(default_factory=lambda: int(os.getenv("SR_LOOKBACK", "100")))
+    sr_swing_n: int = field(default_factory=lambda: int(os.getenv("SR_SWING_N", "3")))
+    sr_touch_tolerance: float = field(default_factory=lambda: float(os.getenv("SR_TOUCH_TOLERANCE", "0.015")))
+    sr_proximity: float = field(default_factory=lambda: float(os.getenv("SR_PROXIMITY", "0.02")))
+    sr_min_touches: int = field(default_factory=lambda: int(os.getenv("SR_MIN_TOUCHES", "2")))
 
 
 def load_config() -> Config:
